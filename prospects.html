@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Cavibara Cartógrafa | NDVI para Grandes Holdings na América Latina</title>
+  <meta name="description" content="Monitoramento NDVI por satélite para grandes holdings agrícolas no Brasil, Argentina, México e Colômbia. Integração com INPE, Sentinel Hub, Planet Labs, Climate FieldView. Reduza custos em 15-20%.">
+  
+  <link href="https://unpkg.com/maplibre-gl@4.7.0/dist/maplibre-gl.css" rel="stylesheet">
+  <script src="https://unpkg.com/maplibre-gl@4.7.0/dist/maplibre-gl.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.0.0/turf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', 'Noto Sans', system-ui, sans-serif; line-height: 1.5; color: #f0f5f0; background: #010118; overflow-x: hidden; }
+    #canvas-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; overflow: hidden; }
+    .content-overlay { position: relative; z-index: 10; background: transparent; }
+    
+    header { background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(102, 187, 106, 0.3); padding: 12px 0; position: sticky; top: 0; z-index: 100; }
+    nav { display: flex; justify-content: space-between; align-items: center; max-width: 1400px; margin: 0 auto; padding: 0 28px; flex-wrap: wrap; gap: 16px; }
+    .logo { display: flex; align-items: center; gap: 12px; font-size: 1.7rem; font-weight: 800; }
+    .logo-svg { width: 56px; height: 56px; filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.5)); transition: transform 0.3s ease; }
+    .logo-svg:hover { transform: scale(1.05); }
+    .nav-right { display: flex; align-items: center; gap: 20px; }
+    nav ul { list-style: none; display: flex; gap: 28px; flex-wrap: wrap; }
+    nav a { color: white; text-decoration: none; font-weight: 600; border-bottom: 2px solid transparent; padding-bottom: 4px; transition: 0.2s; }
+    nav a:hover { border-bottom-color: #FFB74D; color: #FFF9C4; }
+    
+    .lang-switcher { position: relative; }
+    .lang-current { background: rgba(0,0,0,0.6); backdrop-filter: blur(8px); border: 1px solid rgba(102,187,106,0.5); border-radius: 40px; padding: 8px 16px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+    .lang-dropdown { position: absolute; top: 100%; right: 0; margin-top: 8px; background: rgba(0,0,0,0.85); backdrop-filter: blur(12px); border-radius: 20px; padding: 8px 0; display: none; flex-direction: column; min-width: 150px; z-index: 200; }
+    .lang-switcher.open .lang-dropdown { display: flex; }
+    .lang-option { padding: 10px 20px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+    .lang-option:hover { background: rgba(102,187,106,0.3); }
+    .lang-option.active { background: rgba(46,125,50,0.5); border-left: 3px solid #FFB74D; }
+    
+    .hero { text-align: center; padding: 100px 20px 80px; background: radial-gradient(ellipse at center, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.7) 100%); backdrop-filter: blur(3px); }
+    .hero h1 { font-size: 3.5rem; margin-bottom: 20px; background: linear-gradient(135deg, #FFFFFF, #A5D6A7); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .hero p { font-size: 1.4rem; max-width: 700px; margin: 0 auto 30px; color: #eef5ee; }
+    .btn { background: linear-gradient(95deg, #66BB6A, #2E7D32); color: white; padding: 14px 38px; border-radius: 60px; display: inline-block; transition: 0.25s; font-weight: bold; border: none; cursor: pointer; font-size: 1.1rem; box-shadow: 0 6px 18px rgba(0,0,0,0.3); text-decoration: none; }
+    .btn:hover { transform: translateY(-3px); background: linear-gradient(95deg, #7BCF7F, #3E9142); }
+    .btn-outline { background: transparent; border: 2px solid #66BB6A; box-shadow: none; }
+    .btn-outline:hover { background: rgba(102,187,106,0.2); transform: translateY(-3px); }
+    
+    section { max-width: 1400px; margin: 0 auto 30px; padding: 70px 28px; background: rgba(5, 10, 20, 0.65); backdrop-filter: blur(8px); border-radius: 48px; border: 1px solid rgba(102, 187, 106, 0.2); }
+    .section-title { text-align: center; font-size: 2.3rem; margin-bottom: 48px; color: #C8E6C9; position: relative; width: 100%; }
+    .section-title:after { content: ''; display: block; width: 80px; height: 4px; background: #FFB74D; margin: 12px auto 0; border-radius: 4px; }
+    
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; margin: 40px 0; text-align: center; }
+    .stat-card { background: rgba(0,0,0,0.4); border-radius: 28px; padding: 24px; border: 1px solid rgba(102,187,106,0.3); }
+    .stat-number { font-size: 2.5rem; font-weight: 800; color: #7CFC00; }
+    .stat-label { font-size: 0.9rem; color: #aaa; margin-top: 8px; }
+    
+    .clients-table-wrapper { overflow-x: auto; margin: 20px 0; }
+    .client-table { width: 100%; border-collapse: collapse; background: rgba(0,0,0,0.4); border-radius: 24px; overflow: hidden; }
+    .client-table th, .client-table td { padding: 16px 12px; text-align: left; border-bottom: 1px solid rgba(102,187,106,0.3); }
+    .client-table th { background: #2E7D32; color: white; font-weight: bold; }
+    .client-table tr:hover { background: rgba(46,125,50,0.2); }
+    
+    .two-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 30px; }
+    @media (max-width: 900px) { .two-columns { grid-template-columns: 1fr; } }
+    
+    .partner-logos { display: flex; flex-wrap: wrap; justify-content: center; gap: 24px; margin: 40px 0 20px; }
+    .partner-item { background: rgba(255,255,255,0.05); padding: 14px 28px; border-radius: 60px; font-weight: 600; border: 1px solid #66BB6A; backdrop-filter: blur(4px); font-size: 0.9rem; }
+    
+    .api-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 28px; margin: 30px 0; }
+    .api-card { background: rgba(20, 30, 25, 0.7); backdrop-filter: blur(8px); padding: 28px; border-radius: 28px; border: 1px solid rgba(102, 187, 106, 0.4); transition: 0.25s; }
+    .api-card:hover { transform: translateY(-5px); border-color: #66BB6A; }
+    .api-icon { font-size: 2.5rem; margin-bottom: 16px; }
+    
+    .contact-form { max-width: 620px; margin: 0 auto; background: rgba(10, 20, 15, 0.75); backdrop-filter: blur(12px); padding: 36px 32px; border-radius: 36px; }
+    .form-group { margin-bottom: 20px; }
+    .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #C8E6C9; }
+    .contact-form input, .contact-form textarea { width: 100%; padding: 14px 18px; border: 1px solid #3c6e3f; border-radius: 40px; background: rgba(0, 0, 0, 0.6); color: white; font-family: inherit; }
+    .contact-form input:focus, .contact-form textarea:focus { outline: none; border-color: #66BB6A; }
+    .btn-submit { background: linear-gradient(95deg, #2E7D32, #1B5E20); width: 100%; padding: 14px; font-size: 1.1rem; color: white; border: none; border-radius: 60px; font-weight: bold; cursor: pointer; }
+    .btn-submit:hover { background: linear-gradient(95deg, #3E9142, #2E7D32); transform: scale(0.98); }
+    
+    footer { background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(12px); text-align: center; padding: 40px 20px; border-top: 1px solid #2E7D32; margin-top: 30px; }
+    footer a { color: #FFB74D; text-decoration: none; }
+    
+    .back-link { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 20px; color: #7CFC00; text-decoration: none; }
+    .back-link:hover { color: #FFB74D; }
+    
+    .legal-note { font-size: 0.7rem; text-align: center; margin-top: 20px; opacity: 0.6; }
+    
+    @media (max-width: 1000px) { .hero h1 { font-size: 2rem; } section { padding: 40px 20px; } .stats-grid { grid-template-columns: repeat(2, 1fr); } nav { flex-direction: column; } .nav-right { width: 100%; justify-content: space-between; } }
+  </style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+<div class="content-overlay">
+
+  <header>
+    <nav>
+      <div class="logo">
+        <svg class="logo-svg" viewBox="0 0 120 120" fill="none">
+          <circle cx="60" cy="60" r="58" fill="#009C3B" stroke="#FFCC00" stroke-width="2.5"/>
+          <polygon points="60,18 98,60 60,102 22,60" fill="#FFCC00" opacity="0.95"/>
+          <circle cx="60" cy="60" r="32" fill="#002776"/>
+          <ellipse cx="60" cy="62" rx="26" ry="24" fill="#D9B28B"/>
+          <circle cx="48" cy="55" r="4.5" fill="white"/>
+          <circle cx="72" cy="55" r="4.5" fill="white"/>
+          <circle cx="49" cy="55" r="2.5" fill="#1A1A1A"/>
+          <circle cx="73" cy="55" r="2.5" fill="#1A1A1A"/>
+        </svg>
+        <span data-i18n="brand">🗺 Cavibara Cartógrafa</span>
+      </div>
+      <div class="nav-right">
+        <ul>
+          <li><a href="index.html" data-i18n="nav_home">← Home / GIS Platform</a></li>
+          <li><a href="#top-clients" data-i18n="nav_clients">Top Clients</a></li>
+          <li><a href="#apis" data-i18n="nav_apis">APIs</a></li>
+          <li><a href="#contact" data-i18n="nav_contact">Contact</a></li>
+        </ul>
+        <div class="lang-switcher" id="langSwitcher">
+          <div class="lang-current"><span>🌐</span> <span id="currentLangLabel">Português</span> <span>▼</span></div>
+          <div class="lang-dropdown">
+            <div class="lang-option" data-lang="pt">🇧🇷 Português</div>
+            <div class="lang-option" data-lang="es">🇪🇸 Español</div>
+            <div class="lang-option" data-lang="en">🇬🇧 English</div>
+            <div class="lang-option" data-lang="ru">🇷🇺 Русский</div>
+          </div>
+        </div>
+      </div>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <h1 data-i18n="hero_title">Monitoramento NDVI para Grandes Holdings Agrícolas</h1>
+    <p data-i18n="hero_subtitle">Reduza custos com fertilizantes em 15-20% e aumente a produtividade com nossa plataforma de análise por satélite</p>
+    <a href="#contact" class="btn" data-i18n="hero_btn">🚀 Solicitar Projeto Piloto Gratuito (50.000+ ha)</a>
+  </div>
+
+  <!-- STATS SECTION -->
+  <section>
+    <h2 class="section-title" data-i18n="stats_title">Impacto Comprovado</h2>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-number">15-20%</div><div class="stat-label" data-i18n="stat_fertilizer">Redução em fertilizantes</div></div>
+      <div class="stat-card"><div class="stat-number">+10-12%</div><div class="stat-label" data-i18n="stat_yield">Aumento de produtividade</div></div>
+      <div class="stat-card"><div class="stat-number">1.5M+</div><div class="stat-label" data-i18n="stat_hectares">Hectares monitorados</div></div>
+      <div class="stat-card"><div class="stat-number">5+</div><div class="stat-label" data-i18n="stat_countries">Países (Brasil, Argentina, Uruguai, México, Colômbia)</div></div>
+    </div>
+  </section>
+
+  <!-- TOP CLIENTS SECTION - FULL LIST FROM YOUR DATA -->
+  <section id="top-clients">
+    <h2 class="section-title" data-i18n="clients_title">🎯 Principais Holdings na Mira</h2>
+    
+    <div class="two-columns">
+      <!-- Brazil column -->
+      <div>
+        <h3 style="color:#FFB74D; margin-bottom:20px;">🇧🇷 Brasil (Top 5)</h3>
+        <table class="client-table">
+          <thead><tr><th>Empresa</th><th>Área (ha)</th><th data-i18n="why_cell">Relevância</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Amaggi</strong></td><td>~1.000.000</td><td data-i18n="amaggi_why">Líder em soja, usa agtech</td></tr>
+            <tr><td><strong>SLC Agrícola</strong></td><td>450.000+</td><td data-i18n="slc_why">Maior produtor de algodão</td></tr>
+            <tr><td><strong>JBS</strong></td><td>Global</td><td data-i18n="jbs_why">Controle de qualidade de pastagens</td></tr>
+            <tr><td><strong>Marfrig Global Foods</strong></td><td>Global</td><td data-i18n="marfrig_why">Monitoramento de pasto sustentável</td></tr>
+            <tr><td><strong>BrasilAgro</strong></td><td>200.000+</td><td data-i18n="brasilagro_why">Otimização do uso da terra</td></tr>
+          </tbody>
+        </table>
+      </div>
+      
+      <!-- Argentina column -->
+      <div>
+        <h3 style="color:#FFB74D; margin-bottom:20px;">🇦🇷 Argentina (Top 6+)</h3>
+        <table class="client-table">
+          <thead><tr><th>Empresa</th><th>Área (ha)</th><th data-i18n="why_cell">Relevância</th></tr></thead>
+          <tbody>
+            <tr><td><strong>CRESUD</strong></td><td>552.000</td><td data-i18n="cresud_why">Maior área na Argentina</td></tr>
+            <tr><td><strong>AGD</strong></td><td>300.000</td><td data-i18n="agd_why">Crescimento +50% em 5 anos</td></tr>
+            <tr><td><strong>Lartirigoyen</strong></td><td>280.000</td><td data-i18n="lartirigoyen_why">Modelo associativo</td></tr>
+            <tr><td><strong>MSU Agro</strong></td><td>220.000</td><td data-i18n="msu_why">1,1M toneladas/ano</td></tr>
+            <tr><td><strong>Adecoagro</strong></td><td>159.125</td><td data-i18n="adeco_why">Opera em 3 países</td></tr>
+            <tr><td><strong>LIPSA</strong></td><td>145.000</td><td data-i18n="lipsa_why">Novo player agressivo</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <!-- Mexico + Colombia + Central America -->
+    <div class="two-columns" style="margin-top:30px;">
+      <div>
+        <h3 style="color:#FFB74D; margin-bottom:20px;">🇲🇽 México (Maquinário Agrícola)</h3>
+        <table class="client-table">
+          <thead><tr><th>Empresa</th><th>Origem</th><th data-i18n="why_cell">Relevância</th></tr></thead>
+          <tbody>
+            <tr><td><strong>John Deere</strong></td><td>🇺🇸 EUA</td><td data-i18n="johndeere_why">Líder em maquinário agrícola</td></tr>
+            <tr><td><strong>AGCO Corp.</strong></td><td>🇺🇸 EUA</td><td data-i18n="agco_why">Tratores e colheitadeiras</td></tr>
+            <tr><td><strong>CNH Industrial</strong></td><td>🇮🇹 Itália</td><td data-i18n="cnh_why">Case IH, New Holland</td></tr>
+            <tr><td><strong>Kubota México</strong></td><td>🇯🇵 Japão</td><td data-i18n="kubota_why">Pequenos e médios tratores</td></tr>
+          </tbody>
+        </table>
+      </div>
+      
+      <div>
+        <h3 style="color:#FFB74D; margin-bottom:20px;">🇨🇴 Colômbia + 🌿 América Central</h3>
+        <table class="client-table">
+          <thead><tr><th>Empresa</th><th>País/Região</th><th data-i18n="why_cell">Especialização</th></tr></thead>
+          <tbody>
+            <tr><td><strong>DAN Zona Franca S.A.S.</strong></td><td>🇨🇴 Colômbia</td><td data-i18n="dan_why">Produtos cárneos preparados</td></tr>
+            <tr><td><strong>Empresas Paúl</strong></td><td>🇨🇴 Colômbia</td><td data-i18n="paul_why">Abate de aves, carne de frango</td></tr>
+            <tr><td><strong>Agrosolutions Group</strong></td><td>🇵🇦 Panamá</td><td data-i18n="agrosolutions_why">Agroquímicos</td></tr>
+            <tr><td><strong>FMC</strong></td><td>🇨🇷 Costa Rica</td><td data-i18n="fmc_why">Defensivos agrícolas</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <!-- Strategic Partners (Traders + Agrochemicals) -->
+    <h3 class="section-title" style="font-size:1.8rem; margin-top:50px;" data-i18n="partners_title">🌎 Parceiros Estratégicos</h3>
+    <div class="partner-logos">
+      <div class="partner-item"><i class="fas fa-chart-line"></i> Bunge Brasil</div>
+      <div class="partner-item"><i class="fas fa-tractor"></i> Cargill</div>
+      <div class="partner-item"><i class="fas fa-globe"></i> Louis Dreyfus</div>
+      <div class="partner-item"><i class="fas fa-flask"></i> Syngenta (20% mercado BR)</div>
+      <div class="partner-item"><i class="fas fa-leaf"></i> Bayer (15% mercado BR)</div>
+      <div class="partner-item"><i class="fas fa-industry"></i> BASF (8.7% mercado BR)</div>
+      <div class="partner-item"><i class="fas fa-seedling"></i> Corteva (8.2% mercado BR)</div>
+      <div class="partner-item"><i class="fas fa-chart-simple"></i> Bunge y Born (Argentina)</div>
+    </div>
+    
+    <p style="text-align:center; margin-top:24px; font-size:0.9rem; opacity:0.8;" data-i18n="clients_note">* Trabalhamos com traders globais e empresas agroquímicas para integração completa da cadeia de suprimentos.</p>
+  </section>
+
+  <!-- API INTEGRATIONS SECTION (expanded) -->
+  <section id="apis">
+    <h2 class="section-title" data-i18n="apis_title">🔌 Integrações de Dados por Satélite & API</h2>
+    <div class="api-grid">
+      <div class="api-card"><div class="api-icon">🇧🇷🛰️</div><h3>INPE (Brasil)</h3><p data-i18n="inpe_text">Provedor oficial brasileiro (CBERS, Landsat) — gratuito, confiável. ⭐⭐⭐⭐⭐ demanda.</p></div>
+      <div class="api-card"><div class="api-icon">🌍📡</div><h3>Sentinel Hub</h3><p data-i18n="sentinel_text">Sentinel-2, Landsat, MODIS. API de processamento NDVI. ⭐⭐⭐⭐ demanda.</p></div>
+      <div class="api-card"><div class="api-icon">🌎🚀</div><h3>Planet Labs</h3><p data-i18n="planet_text">Imagens diárias 3-5m para agricultura de precisão. ⭐⭐⭐⭐ demanda.</p></div>
+      <div class="api-card"><div class="api-icon">📊🌾</div><h3>Climate FieldView</h3><p data-i18n="fieldview_text">Integração com plataforma da Bayer (Amaggi, SLC). ⭐⭐⭐ demanda.</p></div>
+      <div class="api-card"><div class="api-icon">🇧🇷📱</div><h3>AgriDigital</h3><p data-i18n="agridigital_text">Provedor local brasileiro de análise agrícola. ⭐⭐⭐ demanda.</p></div>
+    </div>
+    <div style="text-align:center; margin-top:20px;">
+      <p style="margin-bottom:16px;" data-i18n="api_flex">✅ Oferecemos flexibilidade: o cliente escolhe a fonte de dados (INPE, Sentinel, Planet, AgriDigital, ou todos)</p>
+      <a href="#contact" class="btn btn-outline" data-i18n="api_btn">🔌 Solicitar demonstração da API</a>
+    </div>
+  </section>
+
+  <!-- CONTACT PERSONS / OUTREACH TARGETS -->
+  <section>
+    <h2 class="section-title" data-i18n="contacts_title">📞 Contatos Estratégicos para Outreach</h2>
+    <div class="two-columns">
+      <div>
+        <h3 style="color:#FFB74D;">🇧🇷 Brasil</h3>
+        <p><i class="fas fa-user-tie"></i> <strong data-i18n="brazil_position1">Agriculture Director / Agronomist</strong><br>Amaggi, SLC Agrícola, JBS, Marfrig, BrasilAgro</p>
+        <h3 style="color:#FFB74D; margin-top:20px;">🇦🇷 Argentina</h3>
+        <p><i class="fas fa-user-tie"></i> <strong data-i18n="argentina_position1">Agriculture Manager / Ag Department Director</strong><br>AGD, MSU Agro, Adecoagro, CRESUD, Lartirigoyen, LIPSA</p>
+      </div>
+      <div>
+        <h3 style="color:#FFB74D;">🇲🇽 México</h3>
+        <p><i class="fas fa-user-tie"></i> <strong data-i18n="mexico_position1">Farm Operations Director</strong><br>John Deere México, AGCO México, CNH Industrial, Kubota México</p>
+        <h3 style="color:#FFB74D; margin-top:20px;">🇨🇴 Colômbia</h3>
+        <p><i class="fas fa-user-tie"></i> <strong data-i18n="colombia_position1">Agricultural Operations Manager</strong><br>DAN Zona Franca S.A.S., Empresas Paúl</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHY CAVIBARA SECTION (with ROI and recommendations) -->
+  <section>
+    <h2 class="section-title" data-i18n="why_title">Por que a Cavibara?</h2>
+    <div class="api-grid">
+      <div class="api-card"><div class="api-icon">🤖</div><h3 data-i18n="why_ai_title">IA para Agricultura</h3><p data-i18n="why_ai_text">Algoritmos proprietários detectam estresse hídrico, pragas e recomendam aplicação variável de insumos.</p></div>
+      <div class="api-card"><div class="api-icon">📈</div><h3 data-i18n="why_roi_title">ROI Comprovado</h3><p data-i18n="why_roi_text">Clientes piloto reduziram custos com fertilizantes em 18% e aumentaram produtividade da soja em 12%.</p></div>
+      <div class="api-card"><div class="api-icon">🌐</div><h3 data-i18n="why_local_title">Suporte Local</h3><p data-i18n="why_local_text">Equipe multilíngue (português, espanhol, inglês) com conhecimento do agronegócio latino-americano.</p></div>
+      <div class="api-card"><div class="api-icon">🔓</div><h3 data-i18n="why_open_title">Padrões Abertos</h3><p data-i18n="why_open_text">Integração com ERP (SAP, Agrotools), maquinário John Deere, Climate FieldView via API.</p></div>
+      <div class="api-card"><div class="api-icon">⚖️</div><h3 data-i18n="why_lgpd_title">LGPD / Privacidade</h3><p data-i18n="why_lgpd_text">Total conformidade com a Lei Geral de Proteção de Dados (LGPD) do Brasil e legislações locais.</p></div>
+      <div class="api-card"><div class="api-icon">💵</div><h3 data-i18n="why_pricing_title">Modelo Flexível</h3><p data-i18n="why_pricing_text">Pay-per-use por hectare/mês. Não há necessidade de assinatura fixa — pagamento conforme uso.</p></div>
+    </div>
+  </section>
+
+  <!-- CONTACT FORM -->
+  <section id="contact">
+    <h2 class="section-title" data-i18n="contact_title">📩 Solicite um Projeto Piloto</h2>
+    <div class="contact-form">
+      <form action="https://formspree.io/f/xqapgvwa" method="POST">
+        <div class="form-group"><label data-i18n="form_name">Nome completo / Empresa</label><input type="text" name="name" placeholder="Ex: João Silva, Amaggi" required></div>
+        <div class="form-group"><label data-i18n="form_email">E-mail corporativo</label><input type="email" name="email" placeholder="joao@amaggi.com" required></div>
+        <div class="form-group"><label data-i18n="form_phone">Telefone (opcional)</label><input type="tel" name="phone" placeholder="+55 11 99999-9999"></div>
+        <div class="form-group"><label data-i18n="form_message">Mensagem (hectares, culturas, necessidades específicas)</label><textarea name="message" rows="4" placeholder="Ex: Represento a SLC Agrícola. Temos 450.000 ha de soja e algodão no Cerrado. Precisamos monitorar NDVI semanalmente e integrar com nosso ERP."></textarea></div>
+        <button type="submit" class="btn-submit" data-i18n="form_submit">🚀 Iniciar Projeto Piloto</button>
+      </form>
+      <p style="text-align:center; margin-top:20px; font-size:0.8rem; opacity:0.7;" data-i18n="contact_note">* Pilot gratuitos para holdings >50.000 ha. Oferecemos suporte em português, espanhol e inglês.</p>
+    </div>
+  </section>
+
+  <footer>
+    <p><a href="index.html" data-i18n="back_home">← Voltar para a plataforma GIS principal</a></p>
+    <p data-i18n="footer_copyright">© 2026 Cavibara Cartógrafa — Monitoramento NDVI para líderes do agronegócio na América Latina</p>
+    <p><a href="#">LinkedIn</a> | <a href="#">Facebook</a> | <a href="#">Expoagro 2026</a> | <a href="#">Tecnosul</a></p>
+    <div class="legal-note" data-i18n="legal_note">✅ Em conformidade com a LGPD (Lei Geral de Proteção de Dados - Brasil) | Termos de uso | Política de privacidade</div>
+  </footer>
+</div>
+
+<!-- MULTILANGUAGE (with PT as default - ALL TRANSLATIONS ADDED) -->
+<script>
+  const translations = {
+    pt: {
+      brand: "🗺 Cavibara Cartógrafa", nav_home: "← Home / GIS Platform", nav_clients: "Top Clients", nav_apis: "APIs", nav_contact: "Contato",
+      hero_title: "Monitoramento NDVI para Grandes Holdings Agrícolas", hero_subtitle: "Reduza custos com fertilizantes em 15-20% e aumente a produtividade com nossa plataforma de análise por satélite", hero_btn: "🚀 Solicitar Projeto Piloto Gratuito (50.000+ ha)",
+      stats_title: "Impacto Comprovado", stat_fertilizer: "Redução em fertilizantes", stat_yield: "Aumento de produtividade", stat_hectares: "Hectares monitorados", stat_countries: "Países",
+      clients_title: "🎯 Principais Holdings na Mira", why_cell: "Relevância",
+      amaggi_why: "Líder em soja, usa agtech", slc_why: "Maior produtor de algodão", jbs_why: "Controle de pastagens", marfrig_why: "Monitoramento sustentável", brasilagro_why: "Otimização do uso da terra",
+      cresud_why: "Maior área na Argentina", agd_why: "Crescimento +50% em 5 anos", lartirigoyen_why: "Modelo associativo", msu_why: "1,1M toneladas/ano", adeco_why: "Opera em 3 países", lipsa_why: "Novo player agressivo",
+      johndeere_why: "Líder em maquinário agrícola", agco_why: "Tratores e colheitadeiras", cnh_why: "Case IH, New Holland", kubota_why: "Pequenos e médios tratores",
+      dan_why: "Produtos cárneos preparados", paul_why: "Abate de aves", agrosolutions_why: "Agroquímicos", fmc_why: "Defensivos agrícolas",
+      partners_title: "🌎 Parceiros Estratégicos", clients_note: "* Trabalhamos com traders globais e empresas agroquímicas para integração completa da cadeia de suprimentos.",
+      apis_title: "🔌 Integrações de Dados por Satélite & API", inpe_text: "Provedor oficial brasileiro (CBERS, Landsat) — gratuito, confiável. ⭐⭐⭐⭐⭐ demanda.", sentinel_text: "Sentinel-2, Landsat, MODIS. API de processamento NDVI. ⭐⭐⭐⭐ demanda.", planet_text: "Imagens diárias 3-5m para agricultura de precisão. ⭐⭐⭐⭐ demanda.", fieldview_text: "Integração com plataforma da Bayer (Amaggi, SLC). ⭐⭐⭐ demanda.", agridigital_text: "Provedor local brasileiro de análise agrícola. ⭐⭐⭐ demanda.", api_flex: "✅ Oferecemos flexibilidade: o cliente escolhe a fonte de dados (INPE, Sentinel, Planet, AgriDigital, ou todos)", api_btn: "🔌 Solicitar demonstração da API",
+      contacts_title: "📞 Contatos Estratégicos para Outreach", brazil_position1: "Agriculture Director / Agronomist", argentina_position1: "Agriculture Manager / Ag Department Director", mexico_position1: "Farm Operations Director", colombia_position1: "Agricultural Operations Manager",
+      why_title: "Por que a Cavibara?", why_ai_title: "IA para Agricultura", why_ai_text: "Algoritmos proprietários detectam estresse hídrico, pragas e recomendam aplicação variável de insumos.", why_roi_title: "ROI Comprovado", why_roi_text: "Clientes piloto reduziram custos com fertilizantes em 18% e aumentaram produtividade da soja em 12%.", why_local_title: "Suporte Local", why_local_text: "Equipe multilíngue (português, espanhol, inglês) com conhecimento do agronegócio latino-americano.", why_open_title: "Padrões Abertos", why_open_text: "Integração com ERP (SAP, Agrotools), maquinário John Deere, Climate FieldView via API.", why_lgpd_title: "LGPD / Privacidade", why_lgpd_text: "Total conformidade com a Lei Geral de Proteção de Dados (LGPD) do Brasil e legislações locais.", why_pricing_title: "Modelo Flexível", why_pricing_text: "Pay-per-use por hectare/mês. Não há necessidade de assinatura fixa — pagamento conforme uso.",
+      contact_title: "📩 Solicite um Projeto Piloto", form_name: "Nome completo / Empresa", form_email: "E-mail corporativo", form_phone: "Telefone (opcional)", form_message: "Mensagem (hectares, culturas, necessidades específicas)", form_submit: "🚀 Iniciar Projeto Piloto", contact_note: "* Pilot gratuitos para holdings >50.000 ha. Oferecemos suporte em português, espanhol e inglês.",
+      back_home: "← Voltar para a plataforma GIS principal", footer_copyright: "© 2026 Cavibara Cartógrafa — Monitoramento NDVI para líderes do agronegócio na América Latina", legal_note: "✅ Em conformidade com a LGPD (Lei Geral de Proteção de Dados - Brasil) | Termos de uso | Política de privacidade"
+    },
+    es: {
+      brand: "🗺 Cavibara Cartógrafa", nav_home: "← Inicio / Plataforma GIS", nav_clients: "Top Clientes", nav_apis: "APIs", nav_contact: "Contacto",
+      hero_title: "Monitoreo NDVI para Grandes Holdings Agrícolas", hero_subtitle: "Reduzca costos de fertilizantes en 15-20% y aumente la productividad con nuestra plataforma de análisis satelital", hero_btn: "🚀 Solicitar Proyecto Piloto Gratuito (50.000+ ha)",
+      stats_title: "Impacto Comprobado", stat_fertilizer: "Reducción en fertilizantes", stat_yield: "Aumento de productividad", stat_hectares: "Hectáreas monitoreadas", stat_countries: "Países",
+      clients_title: "🎯 Principales Holdings en el Radar", why_cell: "Relevancia",
+      amaggi_why: "Líder en soja, usa agtech", slc_why: "Mayor productor de algodón", jbs_why: "Control de pasturas", marfrig_why: "Monitoreo sustentable", brasilagro_why: "Optimización del uso de tierra",
+      cresud_why: "Mayor área en Argentina", agd_why: "Crecimiento +50% en 5 años", lartirigoyen_why: "Modelo asociativo", msu_why: "1,1M toneladas/año", adeco_why: "Opera en 3 países", lipsa_why: "Nuevo player agresivo",
+      johndeere_why: "Líder en maquinaria agrícola", agco_why: "Tractores y cosechadoras", cnh_why: "Case IH, New Holland", kubota_why: "Tractores pequeños y medianos",
+      dan_why: "Productos cárnicos preparados", paul_why: "Faena de aves", agrosolutions_why: "Agroquímicos", fmc_why: "Defensivos agrícolas",
+      partners_title: "🌎 Socios Estratégicos", clients_note: "* Trabajamos con traders globales y empresas agroquímicas para integración completa de la cadena de suministro.",
+      apis_title: "🔌 Integraciones de Datos Satelitales & API", inpe_text: "Proveedor oficial brasileño (CBERS, Landsat) — gratuito, confiable. ⭐⭐⭐⭐⭐ demanda.", sentinel_text: "Sentinel-2, Landsat, MODIS. API de procesamiento NDVI. ⭐⭐⭐⭐ demanda.", planet_text: "Imágenes diarias 3-5m para agricultura de precisión. ⭐⭐⭐⭐ demanda.", fieldview_text: "Integración con plataforma de Bayer (Amaggi, SLC). ⭐⭐⭐ demanda.", agridigital_text: "Proveedor local brasileño de análisis agrícola. ⭐⭐⭐ demanda.", api_flex: "✅ Ofrecemos flexibilidad: el cliente elige la fuente de datos (INPE, Sentinel, Planet, AgriDigital, o todos)", api_btn: "🔌 Solicitar demostración de la API",
+      contacts_title: "📞 Contactos Estratégicos para Outreach", brazil_position1: "Director de Agricultura / Agrónomo", argentina_position1: "Gerente de Agricultura / Director de Departamento Agrario", mexico_position1: "Director de Operaciones Agrícolas", colombia_position1: "Gerente de Operaciones Agrícolas",
+      why_title: "¿Por qué Cavibara?", why_ai_title: "IA para Agricultura", why_ai_text: "Algoritmos propietarios detectan estrés hídrico, plagas y recomiendan aplicación variable de insumos.", why_roi_title: "ROI Comprobado", why_roi_text: "Clientes piloto redujeron costos de fertilizantes en 18% y aumentaron productividad de soja en 12%.", why_local_title: "Soporte Local", why_local_text: "Equipo multilingüe (portugués, español, inglés) con conocimiento del agronegocio latinoamericano.", why_open_title: "Estándares Abiertos", why_open_text: "Integración con ERP (SAP, Agrotools), maquinaria John Deere, Climate FieldView vía API.", why_lgpd_title: "LGPD / Privacidad", why_lgpd_text: "Total cumplimiento con la Ley General de Protección de Datos (LGPD) de Brasil y legislaciones locales.", why_pricing_title: "Modelo Flexible", why_pricing_text: "Pago por uso por hectárea/mes. No requiere suscripción fija.",
+      contact_title: "📩 Solicitar un Proyecto Piloto", form_name: "Nombre completo / Empresa", form_email: "Correo corporativo", form_phone: "Teléfono (opcional)", form_message: "Mensaje (hectáreas, cultivos, necesidades específicas)", form_submit: "🚀 Iniciar Proyecto Piloto", contact_note: "* Pilotos gratuitos para holdings >50.000 ha. Soporte en portugués, español e inglés.",
+      back_home: "← Volver a la plataforma GIS principal", footer_copyright: "© 2026 Cavibara Cartógrafa — Monitoreo NDVI para líderes del agronegocio en América Latina", legal_note: "✅ En cumplimiento con la LGPD (Ley General de Protección de Datos - Brasil) | Términos de uso | Política de privacidad"
+    },
+    en: {
+      brand: "🗺 Cavibara Cartógrafa", nav_home: "← Home / GIS Platform", nav_clients: "Top Clients", nav_apis: "APIs", nav_contact: "Contact",
+      hero_title: "NDVI Monitoring for Large Agricultural Holdings", hero_subtitle: "Reduce fertilizer costs by 15-20% and increase yields with our satellite analytics platform", hero_btn: "🚀 Request Free Pilot Project (50,000+ ha)",
+      stats_title: "Proven Impact", stat_fertilizer: "Fertilizer reduction", stat_yield: "Yield increase", stat_hectares: "Hectares monitored", stat_countries: "Countries",
+      clients_title: "🎯 Target Agro Holdings", why_cell: "Why Relevant",
+      amaggi_why: "Soy export leader, uses agtech", slc_why: "Largest cotton producer", jbs_why: "Pasture quality control", marfrig_why: "Sustainable pasture monitoring", brasilagro_why: "Land use optimization",
+      cresud_why: "Largest area in Argentina", agd_why: "+50% growth in 5 years", lartirigoyen_why: "Associative model", msu_why: "1.1M tons/year", adeco_why: "Operates in 3 countries", lipsa_why: "Aggressive new player",
+      johndeere_why: "Agricultural machinery leader", agco_why: "Tractors & harvesters", cnh_why: "Case IH, New Holland", kubota_why: "Small & medium tractors",
+      dan_why: "Prepared meat products", paul_why: "Poultry slaughter", agrosolutions_why: "Agrochemicals", fmc_why: "Crop protection",
+      partners_title: "🌎 Strategic Partners", clients_note: "* We work with global traders and agrochemical companies for full supply chain integration.",
+      apis_title: "🔌 Satellite Data & API Integrations", inpe_text: "Official Brazilian provider (CBERS, Landsat) — free, reliable. ⭐⭐⭐⭐⭐ demand.", sentinel_text: "Sentinel-2, Landsat, MODIS. NDVI processing API. ⭐⭐⭐⭐ demand.", planet_text: "Daily 3-5m imagery for precision agriculture. ⭐⭐⭐⭐ demand.", fieldview_text: "Integration with Bayer's platform (Amaggi, SLC). ⭐⭐⭐ demand.", agridigital_text: "Local Brazilian ag analytics provider. ⭐⭐⭐ demand.", api_flex: "✅ We offer flexibility: client chooses data source (INPE, Sentinel, Planet, AgriDigital, or all)", api_btn: "🔌 Request API demo",
+      contacts_title: "📞 Strategic Outreach Contacts", brazil_position1: "Agriculture Director / Agronomist", argentina_position1: "Agriculture Manager / Ag Department Director", mexico_position1: "Farm Operations Director", colombia_position1: "Agricultural Operations Manager",
+      why_title: "Why Cavibara?", why_ai_title: "AI for Agriculture", why_ai_text: "Proprietary algorithms detect water stress, pests, and recommend variable rate application.", why_roi_title: "Proven ROI", why_roi_text: "Pilot clients reduced fertilizer costs by 18% and increased soybean yields by 12%.", why_local_title: "Local Support", why_local_text: "Multilingual team (Portuguese, Spanish, English) with deep knowledge of Latin American agribusiness.", why_open_title: "Open Standards", why_open_text: "Integration with ERP (SAP, Agrotools), John Deere machinery, Climate FieldView via API.", why_lgpd_title: "LGPD / Privacy", why_lgpd_text: "Full compliance with Brazil's General Data Protection Law (LGPD) and local regulations.", why_pricing_title: "Flexible Pricing", why_pricing_text: "Pay-per-use per hectare/month. No fixed subscription required.",
+      contact_title: "📩 Request a Pilot Project", form_name: "Full name / Company", form_email: "Corporate email", form_phone: "Phone (optional)", form_message: "Message (hectares, crops, specific needs)", form_submit: "🚀 Start Pilot Project", contact_note: "* Free pilots for holdings >50,000 ha. Support in Portuguese, Spanish, and English.",
+      back_home: "← Back to main GIS platform", footer_copyright: "© 2026 Cavibara Cartógrafa — NDVI monitoring for LatAm agro leaders", legal_note: "✅ LGPD compliant (Brazil General Data Protection Law) | Terms of use | Privacy policy"
+    },
+    ru: {
+      brand: "🗺 Cavibara Cartógrafa", nav_home: "← Главная / GIS платформа", nav_clients: "Клиенты", nav_apis: "API", nav_contact: "Контакты",
+      hero_title: "NDVI мониторинг для крупных агрохолдингов", hero_subtitle: "Сократите расходы на удобрения на 15-20% и повысьте урожайность с нашей спутниковой аналитикой", hero_btn: "🚀 Запросить бесплатный пилотный проект (50 000+ га)",
+      stats_title: "Доказанная эффективность", stat_fertilizer: "Сокращение удобрений", stat_yield: "Рост урожайности", stat_hectares: "Гектаров под мониторингом", stat_countries: "Стран",
+      clients_title: "🎯 Целевые агрохолдинги", why_cell: "Почему релевантно",
+      amaggi_why: "Лидер по сое, использует агротех", slc_why: "Крупнейший производитель хлопка", jbs_why: "Контроль качества пастбищ", marfrig_why: "Мониторинг устойчивых пастбищ", brasilagro_why: "Оптимизация землепользования",
+      cresud_why: "Крупнейшая площадь в Аргентине", agd_why: "Рост +50% за 5 лет", lartirigoyen_why: "Ассоциативная модель", msu_why: "1,1 млн тонн зерна в год", adeco_why: "Работает в 3 странах", lipsa_why: "Агрессивный новый игрок",
+      johndeere_why: "Лидер сельхозтехники", agco_why: "Тракторы и комбайны", cnh_why: "Case IH, New Holland", kubota_why: "Малые и средние тракторы",
+      dan_why: "Мясные продукты", paul_why: "Убой птицы", agrosolutions_why: "Агрохимия", fmc_why: "Средства защиты растений",
+      partners_title: "🌎 Стратегические партнёры", clients_note: "* Мы работаем с глобальными трейдерами и агрохимическими компаниями для полной интеграции цепочки поставок.",
+      apis_title: "🔌 Интеграции спутниковых данных и API", inpe_text: "Официальный бразильский провайдер (CBERS, Landsat) — бесплатно, надёжно. ⭐⭐⭐⭐⭐ спрос.", sentinel_text: "Sentinel-2, Landsat, MODIS. API обработки NDVI. ⭐⭐⭐⭐ спрос.", planet_text: "Ежедневные снимки 3-5 м для точного земледелия. ⭐⭐⭐⭐ спрос.", fieldview_text: "Интеграция с платформой Bayer (Amaggi, SLC). ⭐⭐⭐ спрос.", agridigital_text: "Местный бразильский провайдер агроаналитики. ⭐⭐⭐ спрос.", api_flex: "✅ Гибкость: клиент выбирает источник данных (INPE, Sentinel, Planet, AgriDigital или все)", api_btn: "🔌 Запросить демонстрацию API",
+      contacts_title: "📞 Контактные лица для аутрича", brazil_position1: "Директор по сельскому хозяйству / Агроном", argentina_position1: "Менеджер по сельскому хозяйству / Директор агродепартамента", mexico_position1: "Директор сельскохозяйственных операций", colombia_position1: "Менеджер сельскохозяйственных операций",
+      why_title: "Почему Cavibara?", why_ai_title: "ИИ для сельского хозяйства", why_ai_text: "Собственные алгоритмы обнаруживают водный стресс, вредителей и рекомендуют дифференцированное внесение удобрений.", why_roi_title: "Доказанный ROI", why_roi_text: "Пилотные клиенты сократили расходы на удобрения на 18% и повысили урожайность сои на 12%.", why_local_title: "Локальная поддержка", why_local_text: "Многоязычная команда (португальский, испанский, английский) с пониманием латиноамериканского агробизнеса.", why_open_title: "Открытые стандарты", why_open_text: "Интеграция с ERP (SAP, Agrotools), техникой John Deere и Climate FieldView через API.", why_lgpd_title: "LGPD / Конфиденциальность", why_lgpd_text: "Полное соответствие бразильскому закону о защите данных (LGPD) и местным нормативным актам.", why_pricing_title: "Гибкая модель оплаты", why_pricing_text: "Оплата за использование за гектар в месяц. Фиксированная подписка не требуется.",
+      contact_title: "📩 Запросить пилотный проект", form_name: "Имя / Компания", form_email: "Корпоративный email", form_phone: "Телефон (опционально)", form_message: "Сообщение (гектары, культуры, потребности)", form_submit: "🚀 Запустить пилот", contact_note: "* Бесплатные пилоты для холдингов >50 000 га. Поддержка на португальском, испанском и английском.",
+      back_home: "← Вернуться на главную GIS платформу", footer_copyright: "© 2026 Cavibara Cartógrafa — NDVI мониторинг для агролидеров Латинской Америки", legal_note: "✅ Соответствие LGPD (Бразильский закон о защите данных) | Условия использования | Политика конфиденциальности"
+    }
+  };
+
+  let currentLang = localStorage.getItem('preferredLang') || 'pt';
+  function applyLanguage(lang) {
+    const t = translations[lang] || translations.pt;
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      const key = el.getAttribute('data-i18n');
+      if (t[key]) el.innerHTML = t[key];
+    });
+    const langNames = { pt:'Português', es:'Español', en:'English', ru:'Русский' };
+    document.getElementById('currentLangLabel').innerText = langNames[lang];
+    document.querySelectorAll('.lang-option').forEach(opt => {
+      if (opt.dataset.lang === lang) opt.classList.add('active');
+      else opt.classList.remove('active');
+    });
+    document.documentElement.lang = lang;
+    document.body.style.direction = 'ltr';
+  }
+  applyLanguage(currentLang);
+
+  document.getElementById('langSwitcher').addEventListener('click', (e) => {
+    const opt = e.target.closest('.lang-option');
+    if (opt) {
+      currentLang = opt.dataset.lang;
+      localStorage.setItem('preferredLang', currentLang);
+      applyLanguage(currentLang);
+      document.getElementById('langSwitcher').classList.remove('open');
+    } else if (e.target.closest('.lang-current')) {
+      document.getElementById('langSwitcher').classList.toggle('open');
+    }
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.lang-switcher')) document.getElementById('langSwitcher').classList.remove('open');
+  });
+</script>
+
+<!-- 3D EARTH + MOON (lightweight version) -->
+<script type="importmap">{ "imports": { "three": "https://unpkg.com/three@0.128.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/" } }</script>
+<script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+  
+  const container = document.getElementById('canvas-container');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x010118);
+  scene.fog = new THREE.FogExp2(0x010118, 0.00003);
+  
+  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 2.2, 11);
+  
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  container.appendChild(renderer.domElement);
+  
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.zoomSpeed = 1.0;
+  controls.target.set(0, 0, 0);
+  
+  // Stars
+  const starGeo = new THREE.BufferGeometry();
+  const starPos = new Float32Array(2500 * 3);
+  for (let i = 0; i < 2500; i++) {
+    starPos[i*3] = (Math.random() - 0.5) * 800;
+    starPos[i*3+1] = (Math.random() - 0.5) * 500;
+    starPos[i*3+2] = (Math.random() - 0.5) * 150 - 50;
+  }
+  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.12, transparent: true, blending: THREE.AdditiveBlending }));
+  scene.add(stars);
+  
+  // Moon orbit
+  const orbitRadius = 3.8;
+  const orbitPoints = [];
+  for (let i = 0; i <= 256; i++) {
+    const a = (i/256) * Math.PI * 2;
+    orbitPoints.push(new THREE.Vector3(Math.cos(a) * orbitRadius, 0, Math.sin(a) * orbitRadius));
+  }
+  const orbitRing = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(orbitPoints), new THREE.LineBasicMaterial({ color: 0x00ccff, transparent: true, opacity: 0.45 }));
+  scene.add(orbitRing);
+  
+  // Lights
+  const sunLight = new THREE.DirectionalLight(0xffeedd, 1.4);
+  sunLight.position.set(8, 12, 5);
+  scene.add(sunLight);
+  scene.add(new THREE.AmbientLight(0x111122, 0.55));
+  const rimLight = new THREE.PointLight(0xff44aa, 0.5);
+  rimLight.position.set(-3, 2, -4);
+  scene.add(rimLight);
+  
+  // Earth
+  const loader = new THREE.TextureLoader();
+  const earth = new THREE.Mesh(
+    new THREE.SphereGeometry(1.2, 128, 128),
+    new THREE.MeshStandardMaterial({
+      map: loader.load('https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg'),
+      roughness: 0.5,
+      metalness: 0.1,
+      normalMap: loader.load('https://threejs.org/examples/textures/planets/earth_normal_2048.jpg')
+    })
+  );
+  scene.add(earth);
+  
+  // Clouds
+  const clouds = new THREE.Mesh(
+    new THREE.SphereGeometry(1.21, 128, 128),
+    new THREE.MeshPhongMaterial({
+      map: loader.load('https://threejs.org/examples/textures/planets/earth_clouds_1024.png'),
+      transparent: true,
+      opacity: 0.12,
+      blending: THREE.AdditiveBlending
+    })
+  );
+  scene.add(clouds);
+  
+  // Moon
+  const moon = new THREE.Mesh(
+    new THREE.SphereGeometry(0.38, 128, 128),
+    new THREE.MeshStandardMaterial({
+      map: loader.load('https://threejs.org/examples/textures/planets/moon_1024.jpg'),
+      roughness: 0.85
+    })
+  );
+  scene.add(moon);
+  
+  let moonAngle = 0;
+  
+  function animate() {
+    requestAnimationFrame(animate);
+    moonAngle += 0.008;
+    moon.position.set(Math.cos(moonAngle) * orbitRadius, 0, Math.sin(moonAngle) * orbitRadius);
+    earth.rotation.y += 0.004;
+    clouds.rotation.y += 0.0045;
+    rimLight.intensity = 0.55 + Math.sin(Date.now() * 0.003) * 0.2;
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+  
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+</script>
+</body>
+</html>
